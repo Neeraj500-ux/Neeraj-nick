@@ -1,32 +1,23 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
   AlertTriangle,
-  Archive,
   ArrowRight,
   BarChart3,
-  Bell,
-  BriefcaseBusiness,
-  Building2,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleDot,
   Clock3,
-  ClipboardCheck,
   Command,
-  FileText,
   FolderKanban,
   Gauge,
-  HelpCircle,
   KanbanSquare,
   LayoutDashboard,
   List as ListIcon,
   Loader2,
-  Mail,
-  MessageCircle,
   MoreHorizontal,
   Plus,
   Search,
@@ -35,11 +26,8 @@ import {
   Target,
   Timer,
   TrendingUp,
-  UserPlus,
-  UserRound,
   Users,
   Wallet,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -53,21 +41,9 @@ import { scoped, useWorkspace } from "../services/workspace";
 import { departments, statuses, type Entity } from "../types";
 import { exportCSV } from "../lib/csv";
 import { TaskPanel } from "../components/TaskPanel";
- 
 
 type DirectorView = "overview" | "list" | "board" | "calendar" | "timeline" | "workload";
-type ComposerKind =
-  | "task"
-  | "project"
-  | "client"
-  | "employee"
-  | "manager"
-  | "team_lead"
-  | "department"
-  | "team";
-
-type ManagementKind = Exclude<ComposerKind, "task" | "project">;
-type WorkComposerKind = Extract<ComposerKind, "task" | "project">;
+type ComposerKind = "task" | "project";
 
 type ComposerForm = {
   name: string;
@@ -92,7 +68,6 @@ type Metric = {
   note: string;
   icon: LucideIcon;
   tone: string;
-  href: string;
 };
 
 type TeamLoad = {
@@ -101,45 +76,6 @@ type TeamLoad = {
   open: number;
   percent: number;
 };
-
-type ManagementForm = {
-  name: string;
-  company: string;
-  email: string;
-  phone: string;
-  profileImage: string;
-  industry: string;
-  address: string;
-  city: string;
-  country: string;
-  status: string;
-  leadSource: string;
-  startDate: string;
-  endDate: string;
-  budget: string;
-  paymentStatus: string;
-  notes: string;
-  role: string;
-  department: string;
-  team: string;
-  manager: string;
-  teamLead: string;
-  joiningDate: string;
-  employmentStatus: string;
-  invitationStatus: string;
-  portalAccess: string;
-  permissions: string;
-  assignedProjects: string;
-  color: string;
-  description: string;
-};
-
-type ToastState = {
-  tone: "success" | "error";
-  message: string;
-};
-
-type WorkspaceRecords = Record<string, Entity[] | undefined>;
 
 const DEFAULT_SPACES: Entity[] = departments.map((name, index) => ({
   id: "space-" + name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
@@ -162,48 +98,6 @@ const projectStatuses = ["Planning", "Active", "At Risk", "On Hold", "Completed"
 
 function stringValue(value: unknown): string {
   return value === null || value === undefined ? "" : String(value);
-}
-
-function rowsFrom(data: unknown, key: string): Entity[] {
-  const value = (data as WorkspaceRecords | null | undefined)?.[key];
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizedStatus(value: unknown): string {
-  return stringValue(value).trim().toLowerCase().replace(/[_-]+/g, " ");
-}
-
-function isActiveEntity(row: Entity): boolean {
-  return !["inactive", "archived", "deleted", "disabled", "closed"].includes(normalizedStatus(row.status));
-}
-
-function isApproved(row: Entity): boolean {
-  return ["approved", "completed", "accepted", "paid"].includes(normalizedStatus(row.status));
-}
-
-function activeClientsNote(clients: Entity[]): string {
-  return clients.filter(isActiveEntity).length + " currently active";
-}
-
-function roleLabel(value: unknown): string {
-  const role = normalizedStatus(value);
-  if (role === "team lead" || role === "team leader") return "Team Lead";
-  if (role === "super admin") return "Super Admin";
-  if (!role) return "Team member";
-  return role.replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function relationId(row: Entity, ...keys: string[]): string {
-  const source = row as Record<string, unknown>;
-  for (const key of keys) {
-    const value = source[key];
-    if (value !== null && value !== undefined && String(value).trim()) return String(value);
-  }
-  return "";
-}
-
-function fieldValue(row: Entity | undefined, ...keys: string[]): string {
-  return row ? relationId(row, ...keys) : "";
 }
 
 function errorMessage(cause: unknown): string {
@@ -323,12 +217,6 @@ function tagsFor(row: Partial<Entity>): string[] {
   return [];
 }
 
-function stringList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
-  if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
-  return [];
-}
-
 function isOverdue(row: Entity, today = localDateKey()): boolean {
   const due = dateKey(row.due);
   return row.status !== "Completed" && Boolean(due) && due < today;
@@ -386,7 +274,7 @@ function DirectorLoadingState() {
         <span className="director-loading-line director-loading-copy" />
       </div>
       <div className="director-kpi-grid">
-        {Array.from({ length: 6 }, (_, index) => (
+        {Array.from({ length: 5 }, (_, index) => (
           <div className="director-kpi director-loading-card" key={index}>
             <span className="director-loading-line director-loading-icon" />
             <span className="director-loading-line director-loading-small" />
@@ -411,16 +299,12 @@ function DirectorComposer({
   spaces,
   defaultSpaceId,
   onClose,
-  onSaved,
-  onFailed,
 }: {
-  kind: WorkComposerKind;
+  kind: ComposerKind;
   row?: Entity;
   spaces: Entity[];
   defaultSpaceId: string;
   onClose: () => void;
-  onSaved?: (message: string) => void;
-  onFailed?: (message: string) => void;
 }) {
   const { data, user, save } = useWorkspace();
   const people = data.employees || [];
@@ -520,28 +404,9 @@ function DirectorComposer({
           amount,
         });
       }
-
-      try {
-        await save("activity_logs", {
-          name: row ? "Work item updated" : "Work item created",
-          description: (row ? "Updated " : "Created ") + name + " in Creative Adhyayan.",
-          actor_id: user?.id,
-          created_by: user?.id,
-          entity_type: kind,
-          entity_id: row?.id,
-          created_at: new Date().toISOString(),
-        });
-      } catch {
-        // The primary write succeeded. Audit logging must not turn a valid
-        // task/project save into a false error state.
-      }
-
-      onSaved?.((row ? "Updated " : "Created ") + kind + " successfully.");
       onClose();
     } catch (cause) {
-      const message = errorMessage(cause);
-      setError(message);
-      onFailed?.(message);
+      setError(errorMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -712,322 +577,6 @@ function DirectorComposer({
   );
 }
 
-function ManagementComposer({
-  kind,
-  row,
-  spaces,
-  onClose,
-  onSaved,
-  onFailed,
-}: {
-  kind: ManagementKind;
-  row?: Entity;
-  spaces: Entity[];
-  onClose: () => void;
-  onSaved?: (message: string) => void;
-  onFailed?: (message: string) => void;
-}) {
-  const { data, user, save } = useWorkspace();
-  const employees = rowsFrom(data, "employees");
-  const projects = rowsFrom(data, "projects");
-  const teams = rowsFrom(data, "teams");
-  const departmentRows = rowsFrom(data, "departments");
-  const activePeople = employees.filter(isActiveEntity);
-  const managers = activePeople.filter((person) =>
-    ["director", "manager", "super admin", "admin"].includes(normalizedStatus(person.role)),
-  );
-  const teamLeads = activePeople.filter((person) =>
-    ["team lead", "team leader", "manager"].includes(normalizedStatus(person.role)),
-  );
-  const departmentOptions = Array.from(new Set([
-    ...departments,
-    ...spaces.map((space) => entityName(space)),
-    ...departmentRows.map((department) => entityName(department)),
-  ].filter(Boolean)));
-  const teamOptions = teams.filter(isActiveEntity);
-  const client = kind === "client";
-  const organization = kind === "department" || kind === "team";
-  const userKind = !client && !organization;
-  const fixedRole = kind === "manager" ? "manager" : kind === "team_lead" ? "team_lead" : "employee";
-  const label = kind === "team_lead" ? "Team Lead" : kind.charAt(0).toUpperCase() + kind.slice(1);
-
-  const [form, setForm] = useState<ManagementForm>(() => ({
-    name: fieldValue(row, "name", "title", "full_name"),
-    company: fieldValue(row, "company", "company_name"),
-    email: fieldValue(row, "email"),
-    phone: fieldValue(row, "phone", "mobile"),
-    profileImage: fieldValue(row, "profile_image", "avatar", "photo_url", "image"),
-    industry: fieldValue(row, "industry"),
-    address: fieldValue(row, "address"),
-    city: fieldValue(row, "city"),
-    country: fieldValue(row, "country") || "India",
-    status: fieldValue(row, "status") || "Active",
-    leadSource: fieldValue(row, "lead_source"),
-    startDate: dateKey(fieldValue(row, "contract_start_date", "start_date")),
-    endDate: dateKey(fieldValue(row, "contract_end_date", "end_date")),
-    budget: fieldValue(row, "budget", "amount"),
-    paymentStatus: fieldValue(row, "payment_status") || "Pending",
-    notes: fieldValue(row, "notes", "description"),
-    role: fieldValue(row, "role") || (userKind ? fixedRole : ""),
-    department: fieldValue(row, "department", "department_id") || departmentOptions[0] || "",
-    team: fieldValue(row, "team", "team_id"),
-    manager: fieldValue(row, "manager_id", "manager", "reporting_manager_id"),
-    teamLead: fieldValue(row, "team_lead_id", "team_lead"),
-    joiningDate: dateKey(fieldValue(row, "joining_date", "join_date")),
-    employmentStatus: fieldValue(row, "employment_status") || "Active",
-    invitationStatus: fieldValue(row, "invitation_status") || "Pending",
-    portalAccess: fieldValue(row, "client_portal_access", "portal_access") || "No",
-    permissions: stringList((row as Record<string, unknown> | undefined)?.permissions).join(", "),
-    assignedProjects: stringList((row as Record<string, unknown> | undefined)?.assigned_projects || (row as Record<string, unknown> | undefined)?.project_ids).join(", "),
-    color: fieldValue(row, "color") || "#38BDF8",
-    description: fieldValue(row, "description", "notes"),
-  }));
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const update = (field: keyof ManagementForm, value: string) => {
-    setForm((current) => ({ ...current, [field]: value }));
-    if (error) setError("");
-  };
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) return;
-
-    const name = form.name.trim();
-    const budget = form.budget.trim() ? Number(form.budget) : 0;
-    if (name.length < 2) {
-      setError("Enter a name with at least two characters.");
-      return;
-    }
-    if ((client || userKind) && !form.email.trim()) {
-      setError("Email is required for this record.");
-      return;
-    }
-    if (form.email.trim() && !/^\S+@\S+\.\S+$/.test(form.email.trim())) {
-      setError("Enter a valid email address.");
-      return;
-    }
-    if (!Number.isFinite(budget) || budget < 0) {
-      setError("Budget must be a valid positive number.");
-      return;
-    }
-    if (form.startDate && form.endDate && form.startDate > form.endDate) {
-      setError("Contract start date cannot be after the end date.");
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-    const collection = client ? "clients" : userKind ? "employees" : kind === "department" ? "departments" : "teams";
-    const role = (userKind ? (form.role || fixedRole) : undefined) as Entity["role"];
-    const shared = {
-      ...(row || {}),
-      id: row?.id,
-      name,
-      status: form.status || "Active",
-      description: form.description.trim() || form.notes.trim(),
-      updated_at: new Date().toISOString(),
-      updated_by: user?.id,
-    };
-    const payload = client
-      ? {
-          ...shared,
-          company: form.company.trim(),
-          company_name: form.company.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          profile_image: form.profileImage.trim() || undefined,
-          industry: form.industry.trim(),
-          address: form.address.trim(),
-          city: form.city.trim(),
-          country: form.country.trim(),
-          lead_source: form.leadSource.trim(),
-          contract_start_date: form.startDate || undefined,
-          contract_end_date: form.endDate || undefined,
-          budget,
-          payment_status: form.paymentStatus,
-          manager_id: form.manager || undefined,
-          team_lead_id: form.teamLead || undefined,
-          team_id: form.team || undefined,
-          assigned_projects: stringList(form.assignedProjects),
-          client_portal_access: form.portalAccess === "Yes",
-          invitation_status: form.invitationStatus,
-          permissions: stringList(form.permissions),
-          notes: form.notes.trim(),
-          created_by: fieldValue(row, "created_by") || user?.id,
-          created_at: fieldValue(row, "created_at") || new Date().toISOString(),
-        }
-      : userKind
-        ? {
-            ...shared,
-            email: form.email.trim(),
-            phone: form.phone.trim(),
-            profile_image: form.profileImage.trim() || undefined,
-            role,
-            department: form.department,
-            department_id: form.department,
-            team: form.team,
-            team_id: form.team,
-            manager: form.manager,
-            manager_id: form.manager || undefined,
-            joining_date: form.joiningDate || undefined,
-            employment_status: form.employmentStatus,
-            invitation_status: form.invitationStatus,
-            assigned_projects: stringList(form.assignedProjects),
-            permissions: stringList(form.permissions),
-            notes: form.notes.trim(),
-            created_by: fieldValue(row, "created_by") || user?.id,
-            created_at: fieldValue(row, "created_at") || new Date().toISOString(),
-          }
-        : {
-            ...shared,
-            department: kind === "team" ? form.department : undefined,
-            department_id: kind === "team" ? form.department : undefined,
-            manager_id: form.manager || undefined,
-            team_lead_id: kind === "team" ? form.teamLead || undefined : undefined,
-            color: form.color,
-            created_by: fieldValue(row, "created_by") || user?.id,
-            created_at: fieldValue(row, "created_at") || new Date().toISOString(),
-          };
-
-    try {
-      await save(collection, payload);
-      try {
-        await save("activity_logs", {
-          name: row ? label + " updated" : label + " added",
-          description: (row ? "Updated " : "Added ") + name + " in Creative Adhyayan.",
-          actor_id: user?.id,
-          created_by: user?.id,
-          entity_type: collection,
-          entity_id: row?.id,
-          created_at: new Date().toISOString(),
-        });
-      } catch {
-        // Keep the successful primary write successful if audit logging is unavailable.
-      }
-      onSaved?.((row ? "Updated " : "Added ") + label + " successfully.");
-      onClose();
-    } catch (cause) {
-      const message = errorMessage(cause);
-      setError(message);
-      onFailed?.(message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const title = row ? "Edit " + label : "Add " + label;
-  const statusOptions = client
-    ? ["Lead", "Active", "At Risk", "Inactive", "Archived"]
-    : ["Active", "Inactive", "Archived"];
-
-  return (
-    <Modal title={title} onClose={busy ? () => undefined : onClose}>
-      <form className="director-form director-management-form" onSubmit={submit} aria-busy={busy}>
-        <div className="director-form-intro">
-          <span className="director-form-icon">
-            {client ? <BriefcaseBusiness size={18} /> : organization ? <Building2 size={18} /> : <UserPlus size={18} />}
-          </span>
-          <span>
-            <strong>{row ? "Keep the record accurate" : "Add it to the live workspace"}</strong>
-            <small>Saved records appear immediately across the Director workspace.</small>
-          </span>
-        </div>
-
-        {client && (
-          <>
-            <div className="director-form-section-heading"><span>01</span><div><strong>Basic information</strong><small>Make the relationship easy to understand.</small></div></div>
-            <div className="director-form-grid">
-              <label className="director-field">Client name *<input required value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Client full name" /></label>
-              <label className="director-field">Company name<input value={form.company} onChange={(event) => update("company", event.target.value)} placeholder="Company or brand" /></label>
-              <label className="director-field">Email *<input required type="email" value={form.email} onChange={(event) => update("email", event.target.value)} placeholder="name@company.com" /></label>
-              <label className="director-field">Phone<input value={form.phone} onChange={(event) => update("phone", event.target.value)} placeholder="+91 98765 43210" /></label>
-              <label className="director-field director-field-wide">Profile image URL<input type="url" value={form.profileImage} onChange={(event) => update("profileImage", event.target.value)} placeholder="https://…" /></label>
-              <label className="director-field">Industry<input value={form.industry} onChange={(event) => update("industry", event.target.value)} placeholder="Technology, retail…" /></label>
-              <label className="director-field">Address<input value={form.address} onChange={(event) => update("address", event.target.value)} placeholder="Street and locality" /></label>
-              <label className="director-field">City<input value={form.city} onChange={(event) => update("city", event.target.value)} placeholder="City" /></label>
-              <label className="director-field">Country<input value={form.country} onChange={(event) => update("country", event.target.value)} placeholder="Country" /></label>
-            </div>
-
-            <div className="director-form-section-heading"><span>02</span><div><strong>Business information</strong><small>Track status, dates and commercial context.</small></div></div>
-            <div className="director-form-grid">
-              <label className="director-field">Client status<select value={form.status} onChange={(event) => update("status", event.target.value)}>{Array.from(new Set([...statusOptions, form.status].filter(Boolean))).map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field">Lead source<input value={form.leadSource} onChange={(event) => update("leadSource", event.target.value)} placeholder="Referral, website…" /></label>
-              <label className="director-field">Contract start<input type="date" value={form.startDate} onChange={(event) => update("startDate", event.target.value)} /></label>
-              <label className="director-field">Contract end<input type="date" value={form.endDate} onChange={(event) => update("endDate", event.target.value)} /></label>
-              <label className="director-field">Budget (₹)<input type="number" min="0" step="100" value={form.budget} onChange={(event) => update("budget", event.target.value)} placeholder="0" /></label>
-              <label className="director-field">Payment status<select value={form.paymentStatus} onChange={(event) => update("paymentStatus", event.target.value)}>{["Pending", "Partial", "Paid", "Overdue"].map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field director-field-wide">Notes<textarea rows={3} value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Important relationship notes…" /></label>
-            </div>
-
-            <div className="director-form-section-heading"><span>03</span><div><strong>Assignment and access</strong><small>Connect the client to the right delivery team.</small></div></div>
-            <div className="director-form-grid">
-              <label className="director-field">Assigned manager<select value={form.manager} onChange={(event) => update("manager", event.target.value)}><option value="">Unassigned</option>{managers.map((person) => <option value={person.id} key={person.id}>{entityName(person)}</option>)}</select></label>
-              <label className="director-field">Assigned team lead<select value={form.teamLead} onChange={(event) => update("teamLead", event.target.value)}><option value="">Unassigned</option>{teamLeads.map((person) => <option value={person.id} key={person.id}>{entityName(person)}</option>)}</select></label>
-              <label className="director-field">Assigned team<select value={form.team} onChange={(event) => update("team", event.target.value)}><option value="">Unassigned</option>{teamOptions.map((team) => <option value={team.id} key={team.id}>{entityName(team)}</option>)}</select></label>
-              <label className="director-field">Portal access<select value={form.portalAccess} onChange={(event) => update("portalAccess", event.target.value)}>{["No", "Yes"].map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field">Invitation status<select value={form.invitationStatus} onChange={(event) => update("invitationStatus", event.target.value)}>{["Pending", "Sent", "Accepted", "Not required"].map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field director-field-wide">Assigned project IDs / names<input value={form.assignedProjects} onChange={(event) => update("assignedProjects", event.target.value)} placeholder="Separate multiple items with commas" /></label>
-              <label className="director-field director-field-wide">Client permissions<input value={form.permissions} onChange={(event) => update("permissions", event.target.value)} placeholder="comments, feedback, approvals" /></label>
-            </div>
-          </>
-        )}
-
-        {userKind && (
-          <>
-            <div className="director-form-section-heading"><span>01</span><div><strong>Profile and role</strong><small>Set the person’s identity and access level.</small></div></div>
-            <div className="director-form-grid">
-              <label className="director-field">Full name *<input required value={form.name} onChange={(event) => update("name", event.target.value)} placeholder="Full name" /></label>
-              <label className="director-field">Email *<input required type="email" value={form.email} onChange={(event) => update("email", event.target.value)} placeholder="name@creativeadhyayan.com" /></label>
-              <label className="director-field">Phone<input value={form.phone} onChange={(event) => update("phone", event.target.value)} placeholder="+91 98765 43210" /></label>
-              <label className="director-field">Profile image URL<input type="url" value={form.profileImage} onChange={(event) => update("profileImage", event.target.value)} placeholder="https://…" /></label>
-              <label className="director-field">Role<select value={form.role || fixedRole} onChange={(event) => update("role", event.target.value)}>{[["manager", "Manager"], ["team_lead", "Team Lead"], ["employee", "Employee"]].map(([value, text]) => <option value={value} key={value}>{text}</option>)}</select></label>
-              <label className="director-field">Department<select value={form.department} onChange={(event) => update("department", event.target.value)}>{departmentOptions.map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field">Team<select value={form.team} onChange={(event) => update("team", event.target.value)}><option value="">Unassigned</option>{teamOptions.map((team) => <option value={team.id} key={team.id}>{entityName(team)}</option>)}</select></label>
-              <label className="director-field">Reporting manager<select value={form.manager} onChange={(event) => update("manager", event.target.value)}><option value="">Unassigned</option>{managers.map((person) => <option value={person.id} key={person.id}>{entityName(person)}</option>)}</select></label>
-            </div>
-
-            <div className="director-form-section-heading"><span>02</span><div><strong>Employment and access</strong><small>Keep people records ready for permission review.</small></div></div>
-            <div className="director-form-grid">
-              <label className="director-field">Joining date<input type="date" value={form.joiningDate} onChange={(event) => update("joiningDate", event.target.value)} /></label>
-              <label className="director-field">Employment status<select value={form.employmentStatus} onChange={(event) => update("employmentStatus", event.target.value)}>{["Active", "Inactive", "On leave", "Archived"].map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field">Invitation status<select value={form.invitationStatus} onChange={(event) => update("invitationStatus", event.target.value)}>{["Pending", "Sent", "Accepted", "Not required"].map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field director-field-wide">Assigned project IDs / names<input value={form.assignedProjects} onChange={(event) => update("assignedProjects", event.target.value)} placeholder="Separate multiple items with commas" /></label>
-              <label className="director-field director-field-wide">Permissions<input value={form.permissions} onChange={(event) => update("permissions", event.target.value)} placeholder="tasks, reports, attendance…" /></label>
-              <label className="director-field director-field-wide">Notes<textarea rows={3} value={form.notes} onChange={(event) => update("notes", event.target.value)} placeholder="Role notes and access context…" /></label>
-            </div>
-          </>
-        )}
-
-        {organization && (
-          <>
-            <div className="director-form-section-heading"><span>01</span><div><strong>Organization structure</strong><small>Keep departments and teams connected to delivery.</small></div></div>
-            <div className="director-form-grid">
-              <label className="director-field director-field-wide">{kind === "department" ? "Department" : "Team"} name *<input required value={form.name} onChange={(event) => update("name", event.target.value)} placeholder={kind === "department" ? "e.g. Growth" : "e.g. Design Pod A"} /></label>
-              {kind === "team" && <label className="director-field">Department<select value={form.department} onChange={(event) => update("department", event.target.value)}>{departmentOptions.map((option) => <option key={option}>{option}</option>)}</select></label>}
-              <label className="director-field">Manager<select value={form.manager} onChange={(event) => update("manager", event.target.value)}><option value="">Unassigned</option>{managers.map((person) => <option value={person.id} key={person.id}>{entityName(person)}</option>)}</select></label>
-              {kind === "team" && <label className="director-field">Team lead<select value={form.teamLead} onChange={(event) => update("teamLead", event.target.value)}><option value="">Unassigned</option>{teamLeads.map((person) => <option value={person.id} key={person.id}>{entityName(person)}</option>)}</select></label>}
-              <label className="director-field">Status<select value={form.status} onChange={(event) => update("status", event.target.value)}>{["Active", "Inactive", "Archived"].map((option) => <option key={option}>{option}</option>)}</select></label>
-              <label className="director-field">Accent color<input type="color" value={form.color} onChange={(event) => update("color", event.target.value)} /></label>
-              <label className="director-field director-field-wide">Description<textarea rows={4} value={form.description} onChange={(event) => update("description", event.target.value)} placeholder="What does this area own?" /></label>
-            </div>
-          </>
-        )}
-
-        {error && <p className="error" role="alert">{error}</p>}
-        <div className="director-form-actions">
-          <Button type="button" className="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button type="submit" disabled={busy} aria-busy={busy}>
-            {busy ? <Loader2 className="director-spin" size={16} /> : <CheckCircle2 size={16} />}
-            {busy ? "Saving…" : row ? "Save changes" : "Add " + label}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
 function TaskRow({
   task,
   project,
@@ -1187,284 +736,6 @@ function GoalCard({ goal }: { goal: Entity }) {
         <small>{percent}% complete</small>
       </div>
     </article>
-  );
-}
-
-function clientRelationProjects(client: Entity, projects: Entity[]): Entity[] {
-  const clientId = stringValue(client.id);
-  const source = client as Record<string, unknown>;
-  const assignedIds = new Set(stringList(source.assigned_projects || source.project_ids || source.projects));
-  return projects.filter((project) => {
-    const linkedClient = relationId(project, "client_id", "clientId", "client");
-    return (linkedClient && linkedClient === clientId) || assignedIds.has(stringValue(project.id));
-  });
-}
-
-function clientNeedsAttention(client: Entity, projects: Entity[], tasks: Entity[]): boolean {
-  if (["at risk", "overdue", "inactive", "archived"].includes(normalizedStatus(client.status))) return true;
-  const relatedProjects = clientRelationProjects(client, projects);
-  return tasks.some((task) => {
-    const linkedClient = relationId(task, "client_id", "clientId", "client");
-    return Boolean(linkedClient && linkedClient === stringValue(client.id) && isOverdue(task));
-  }) || relatedProjects.some((project) => normalizedStatus(project.status) === "at risk");
-}
-
-function ClientCard({
-  client,
-  projects,
-  tasks,
-  people,
-  onEdit,
-  onArchive,
-}: {
-  client: Entity;
-  projects: Entity[];
-  tasks: Entity[];
-  people: Entity[];
-  onEdit: () => void;
-  onArchive: () => void;
-}) {
-  const relatedProjects = clientRelationProjects(client, projects);
-  const projectIds = new Set(relatedProjects.map((project) => stringValue(project.id)));
-  const relatedTasks = tasks.filter((task) => {
-    const linkedClient = relationId(task, "client_id", "clientId", "client");
-    return linkedClient === stringValue(client.id) || projectIds.has(stringValue(task.project_id));
-  });
-  const openTasks = relatedTasks.filter((task) => task.status !== "Completed").length;
-  const completion = relatedProjects.length
-    ? Math.round(relatedProjects.reduce((sum, project) => sum + progressFor(stringValue(project.id), tasks), 0) / relatedProjects.length)
-    : 0;
-  const managerId = relationId(client, "manager_id", "manager", "assigned_manager_id");
-  const teamLeadId = relationId(client, "team_lead_id", "team_lead", "assigned_team_lead_id");
-  const manager = people.find((person) => stringValue(person.id) === managerId);
-  const teamLead = people.find((person) => stringValue(person.id) === teamLeadId);
-  const email = fieldValue(client, "email");
-  const phone = fieldValue(client, "phone", "mobile");
-  const attention = clientNeedsAttention(client, projects, tasks);
-
-  return (
-    <article className={"director-client-card " + (attention ? "is-attention" : "")}>
-      <div className="director-client-card-head">
-        <Avatar name={entityName(client)} />
-        <span>
-          <strong>{entityName(client)}</strong>
-          <small>{fieldValue(client, "company", "company_name") || "Independent client"}</small>
-        </span>
-        <Badge value={attention ? "Needs attention" : stringValue(client.status || "Active")} />
-      </div>
-      <div className="director-client-contact">
-        {email ? <a href={"mailto:" + email}><Mail size={14} />{email}</a> : <span><Mail size={14} />No email added</span>}
-        {phone ? <span><MessageCircle size={14} />{phone}</span> : <span><MessageCircle size={14} />No phone added</span>}
-      </div>
-      <div className="director-client-stats">
-        <span><b>{relatedProjects.length}</b><small>Projects</small></span>
-        <span><b>{openTasks}</b><small>Open tasks</small></span>
-        <span><b>{completion}%</b><small>Delivery</small></span>
-      </div>
-      <div className="director-client-progress"><i style={{ width: completion + "%" }} /></div>
-      <div className="director-client-relationships">
-        <span><small>Manager</small><strong>{manager ? entityName(manager) : "Unassigned"}</strong></span>
-        <span><small>Team lead</small><strong>{teamLead ? entityName(teamLead) : "Unassigned"}</strong></span>
-        <span><small>Last activity</small><strong>{dateLabel(fieldValue(client, "last_activity", "updated_at", "created_at"))}</strong></span>
-      </div>
-      <div className="director-client-actions">
-        {email ? <a className="btn secondary" href={"mailto:" + email}><MessageCircle size={14} /> Contact</a> : <span className="director-action-muted">Contact unavailable</span>}
-        <button type="button" className="btn secondary" onClick={onEdit}><SlidersHorizontal size={14} /> Edit</button>
-        <button type="button" className="icon-btn danger" onClick={onArchive} aria-label={"Archive " + entityName(client)} title="Archive client"><Archive size={16} /></button>
-      </div>
-    </article>
-  );
-}
-
-function ClientSummarySection({
-  clients,
-  projects,
-  tasks,
-  people,
-  onAdd,
-  onEdit,
-  onArchive,
-}: {
-  clients: Entity[];
-  projects: Entity[];
-  tasks: Entity[];
-  people: Entity[];
-  onAdd: () => void;
-  onEdit: (client: Entity) => void;
-  onArchive: (client: Entity) => void;
-}) {
-  const now = new Date();
-  const activeClients = clients.filter(isActiveEntity);
-  const newThisMonth = clients.filter((client) => {
-    const date = dateFromValue(fieldValue(client, "created_at", "createdAt"));
-    return Boolean(date && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth());
-  });
-  const attention = clients.filter((client) => clientNeedsAttention(client, projects, tasks));
-  const summaries = [
-    { label: "Total Clients", value: clients.length, note: "Live client records", tone: "blue", icon: BriefcaseBusiness },
-    { label: "Active Clients", value: activeClients.length, note: "Currently in delivery", tone: "green", icon: CheckCircle2 },
-    { label: "New This Month", value: newThisMonth.length, note: "Created this month", tone: "violet", icon: TrendingUp },
-    { label: "Needs Attention", value: attention.length, note: "Risk, overdue or inactive", tone: "red", icon: AlertTriangle },
-  ];
-
-  return (
-    <section className="director-card director-client-summary-shell">
-      <div className="director-card-heading">
-        <div>
-          <span className="eyebrow"><BriefcaseBusiness size={14} /> CLIENT SUMMARY</span>
-          <h2>Relationships that need momentum</h2>
-        </div>
-        <div className="director-heading-actions"><button type="button" className="btn" onClick={onAdd}><Plus size={15} /> Add client</button><Link to="/clients">View all <ArrowRight size={15} /></Link></div>
-      </div>
-      <div className="director-client-summary-grid">
-        {summaries.map(({ label, value, note, tone, icon: Icon }) => (
-          <article className={"director-summary-stat director-summary-stat-" + tone} key={label}>
-            <span><Icon size={16} /></span><small>{label}</small><strong>{value}</strong><em>{note}</em>
-          </article>
-        ))}
-      </div>
-      {clients.length ? (
-        <div className="director-client-grid">
-          {clients.slice().sort((a, b) => Number(clientNeedsAttention(b, projects, tasks)) - Number(clientNeedsAttention(a, projects, tasks))).slice(0, 6).map((client) => (
-            <ClientCard key={client.id} client={client} projects={projects} tasks={tasks} people={people} onEdit={() => onEdit(client)} onArchive={() => onArchive(client)} />
-          ))}
-        </div>
-      ) : (
-        <Empty title="No clients yet" description="Add the first client to start tracking relationships and delivery." />
-      )}
-    </section>
-  );
-}
-
-function PeopleSummarySection({
-  people,
-  onAdd,
-  onEdit,
-}: {
-  people: Entity[];
-  onAdd: (kind: ComposerKind) => void;
-  onEdit: (person: Entity) => void;
-}) {
-  const activePeople = people.filter(isActiveEntity);
-  const roleGroups = [
-    { label: "Directors", value: people.filter((person) => normalizedStatus(person.role) === "director").length },
-    { label: "Managers", value: people.filter((person) => normalizedStatus(person.role) === "manager").length },
-    { label: "Team Leads", value: people.filter((person) => ["team lead", "team leader", "team_lead"].includes(normalizedStatus(person.role))).length },
-    { label: "Employees", value: people.filter((person) => normalizedStatus(person.role) === "employee").length },
-    { label: "Inactive", value: people.filter((person) => !isActiveEntity(person)).length },
-  ];
-
-  return (
-    <section className="director-card director-people-summary-shell">
-      <div className="director-card-heading">
-        <div><span className="eyebrow"><Users size={14} /> PEOPLE AND ROLES</span><h2>Keep the hierarchy clear</h2></div>
-        <div className="director-heading-actions"><button type="button" className="btn" onClick={() => onAdd("employee")}><UserPlus size={15} /> Add person</button><Link to="/people">Open people <ArrowRight size={15} /></Link></div>
-      </div>
-      <div className="director-role-stat-row">{roleGroups.map((group) => <button type="button" key={group.label} onClick={() => onAdd(group.label === "Managers" ? "manager" : group.label === "Team Leads" ? "team_lead" : "employee")}><strong>{group.value}</strong><span>{group.label}</span></button>)}</div>
-      {activePeople.length ? (
-        <div className="director-people-preview">
-          {activePeople.slice(0, 6).map((person) => (
-            <button type="button" className="director-person-preview" key={person.id} onClick={() => onEdit(person)}>
-              <Avatar name={entityName(person)} role={person.role} />
-              <span><strong>{entityName(person)}</strong><small>{roleLabel(person.role)} · {fieldValue(person, "department", "department_id") || "No department"}</small></span>
-              <ChevronRight size={15} />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <Empty title="No active people yet" description="Add a manager, team lead or employee to see team capacity here." />
-      )}
-    </section>
-  );
-}
-
-function barWidth(value: number, maximum: number): string {
-  return Math.max(0, Math.min(100, maximum ? Math.round((value / maximum) * 100) : 0)) + "%";
-}
-
-function DirectorAnalytics({
-  tasks,
-  projects,
-  people,
-  clients,
-  attendance,
-  invoices,
-}: {
-  tasks: Entity[];
-  projects: Entity[];
-  people: Entity[];
-  clients: Entity[];
-  attendance: Entity[];
-  invoices: Entity[];
-}) {
-  const statusesForChart = Array.from(new Set([...statuses, ...tasks.map((task) => stringValue(task.status))].filter(Boolean)));
-  const priorities = ["Urgent", "High", "Medium", "Low"];
-  const monthlyRevenue = invoices.reduce((sum, invoice) => sum + (isApproved(invoice) ? numberValue(invoice.amount) : 0), 0);
-  const attendancePresent = attendance.filter((row) => ["present", "on time", "approved"].includes(normalizedStatus(row.status))).length;
-  const attendanceRate = attendance.length ? Math.round((attendancePresent / attendance.length) * 100) : 0;
-  const activeProjects = projects.filter((project) => isActiveEntity(project) && normalizedStatus(project.status) !== "completed");
-
-  return (
-    <section className="director-card director-analytics-shell">
-      <div className="director-card-heading"><div><span className="eyebrow"><BarChart3 size={14} /> LIVE ANALYTICS</span><h2>Delivery signals from real records</h2></div><Link to="/reports">Open reports <ArrowRight size={15} /></Link></div>
-      <div className="director-analytics-grid">
-        <article className="director-analytics-panel">
-          <div className="director-analytics-panel-head"><span><ClipboardCheck size={16} /> Tasks by status</span><strong>{tasks.length}</strong></div>
-          <div className="director-analytics-bars">{statusesForChart.map((status) => { const count = tasks.filter((task) => stringValue(task.status) === status).length; return <div className="director-analytics-bar-row" key={status}><span>{status}</span><i><b style={{ width: barWidth(count, tasks.length) }} /></i><strong>{count}</strong></div>; })}</div>
-        </article>
-        <article className="director-analytics-panel">
-          <div className="director-analytics-panel-head"><span><Target size={16} /> Priority mix</span><strong>{tasks.filter((task) => task.status !== "Completed").length} open</strong></div>
-          <div className="director-analytics-bars">{priorities.map((priority) => { const count = tasks.filter((task) => stringValue(task.priority) === priority).length; return <div className="director-analytics-bar-row" key={priority}><span>{priority}</span><i><b className={"priority-bar priority-bar-" + priority.toLowerCase()} style={{ width: barWidth(count, tasks.length) }} /></i><strong>{count}</strong></div>; })}</div>
-        </article>
-        <article className="director-analytics-panel director-analytics-highlight">
-          <div className="director-analytics-panel-head"><span><Gauge size={16} /> Organization pulse</span><strong>{attendance.length ? attendanceRate + "%" : "—"}</strong></div>
-          <div className="director-pulse-facts"><span><b>{activeProjects.length}</b><small>active projects</small></span><span><b>{people.filter(isActiveEntity).length}</b><small>active people</small></span><span><b>{clients.filter(isActiveEntity).length}</b><small>active clients</small></span></div>
-          <div className="director-analytics-note"><span>{attendance.length ? "Attendance overview" : "Attendance data not connected yet"}</span><strong>{attendance.length ? attendancePresent + " of " + attendance.length + " records present" : "Add attendance records to see the rate"}</strong></div>
-          {invoices.length > 0 && <div className="director-analytics-note"><span>Approved finance</span><strong>{currency(monthlyRevenue)}</strong></div>}
-        </article>
-      </div>
-    </section>
-  );
-}
-
-function DirectorQuickActions({ onAction }: { onAction: (kind: ComposerKind) => void }) {
-  const actions: Array<{ kind: ComposerKind; label: string; description: string; icon: LucideIcon }> = [
-    { kind: "client", label: "Add Client", description: "Start a new relationship", icon: BriefcaseBusiness },
-    { kind: "employee", label: "Add Employee", description: "Create an employee record", icon: UserRound },
-    { kind: "manager", label: "Add Manager", description: "Set a reporting owner", icon: Users },
-    { kind: "team_lead", label: "Add Team Lead", description: "Assign team leadership", icon: UserPlus },
-    { kind: "department", label: "Create Department", description: "Add an organization space", icon: Building2 },
-    { kind: "team", label: "Create Team", description: "Group people for delivery", icon: Users },
-    { kind: "project", label: "Create Project", description: "Plan a delivery outcome", icon: FolderKanban },
-    { kind: "task", label: "Create Task", description: "Turn work into an action", icon: CheckCircle2 },
-  ];
-
-  return (
-    <section className="director-card director-quick-actions-shell">
-      <div className="director-card-heading"><div><span className="eyebrow"><Sparkles size={14} /> QUICK ACTIONS</span><h2>Move the workspace forward</h2></div><span className="director-card-kicker">Every action saves to the live workspace</span></div>
-      <div className="director-quick-actions-grid">{actions.map(({ kind, label, description, icon: Icon }) => <button type="button" key={kind} onClick={() => onAction(kind)}><span className="director-quick-action-icon"><Icon size={18} /></span><span><strong>{label}</strong><small>{description}</small></span><ArrowRight size={15} /></button>)}</div>
-    </section>
-  );
-}
-
-function QuickAddMenu({ onAction }: { onAction: (kind: ComposerKind) => void }) {
-  const [open, setOpen] = useState(false);
-  const actions: Array<{ kind: ComposerKind; label: string; icon: LucideIcon }> = [
-    { kind: "client", label: "Add Client", icon: BriefcaseBusiness },
-    { kind: "employee", label: "Add Employee", icon: UserRound },
-    { kind: "manager", label: "Add Manager", icon: Users },
-    { kind: "team_lead", label: "Add Team Lead", icon: UserPlus },
-    { kind: "department", label: "Create Department", icon: Building2 },
-    { kind: "team", label: "Create Team", icon: Users },
-    { kind: "project", label: "Create Project", icon: FolderKanban },
-    { kind: "task", label: "Create Task", icon: CheckCircle2 },
-  ];
-
-  return (
-    <div className="director-quick-add">
-      <button type="button" className="btn" onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-haspopup="menu"><Plus size={16} /> Quick Add <ChevronRight className={open ? "director-chevron-open" : ""} size={14} /></button>
-      {open && <div className="director-quick-add-menu" role="menu">{actions.map(({ kind, label, icon: Icon }) => <button type="button" role="menuitem" key={kind} onClick={() => { setOpen(false); onAction(kind); }}><Icon size={16} />{label}</button>)}</div>}
-    </div>
   );
 }
 
@@ -1695,26 +966,13 @@ export default function DirectorDashboard() {
   const [composer, setComposer] = useState<{ kind: ComposerKind; row?: Entity } | null>(null);
   const [selectedTask, setSelectedTask] = useState<Entity | null>(null);
   const [actionError, setActionError] = useState("");
-  const [toast, setToast] = useState<ToastState | null>(null);
-  const [archiveClient, setArchiveClient] = useState<Entity | null>(null);
-  const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
-  const projects = rowsFrom(data, "projects");
+  const projects = data.projects || [];
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
-  const spaces = useMemo(() => {
-    const storedSpaces = rowsFrom(data, "spaces");
-    const storedDepartments = rowsFrom(data, "departments");
-    const combined = [...storedSpaces, ...storedDepartments];
-    if (!combined.length) return DEFAULT_SPACES;
-    return Array.from(new Map(combined.map((space) => [stringValue(space.id) || slug(entityName(space)), space])).values());
-  }, [data]);
-  const tasks = useMemo(() => scoped(rowsFrom(data, "tasks"), user), [data, user]);
-  const employees = rowsFrom(data, "employees");
-  const clients = rowsFrom(data, "clients");
-  const approvals = rowsFrom(data, "approvals");
-  const attendance = rowsFrom(data, "attendance");
-  const invoices = rowsFrom(data, "invoices").concat(rowsFrom(data, "finance"));
+  const spaces = useMemo(() => (data.spaces || []).length ? data.spaces || [] : DEFAULT_SPACES, [data.spaces]);
+  const tasks = useMemo(() => scoped(data.tasks || [], user), [data.tasks, user]);
+  const employees = data.employees || [];
   const peopleById = useMemo(() => new Map(employees.map((person) => [person.id, person])), [employees]);
   const today = localDateKey();
   const selectedSpace = spaces.find((space) => space.id === activeSpace);
@@ -1760,9 +1018,9 @@ export default function DirectorDashboard() {
   const overdue = openTasks.filter((task) => isOverdue(task, today));
   const review = spaceTasks.filter((task) => task.status === "Internal Review" || task.status === "Revision");
   const completion = Math.round((completed / Math.max(spaceTasks.length, 1)) * 100);
-  const activeProjects = visibleProjects.filter((project) => isActiveEntity(project) && normalizedStatus(project.status) !== "completed");
-  const activePeople = employees.filter(isActiveEntity);
-  const pendingApprovals = approvals.filter((approval) => !isApproved(approval));
+  const collected = (data.invoices || [])
+    .filter((invoice) => invoice.status === "Paid")
+    .reduce((sum, invoice) => sum + numberValue(invoice.amount), 0);
   const sevenDaysFromToday = addDaysKey(today, 7);
   const soon = openTasks.filter((task) => {
     const due = dateKey(task.due);
@@ -1772,12 +1030,11 @@ export default function DirectorDashboard() {
   const capacity = employees.length ? Math.round((totalOpenHours / (employees.length * 40)) * 100) : 0;
 
   const metrics: Metric[] = [
-    { label: "Total Clients", value: clients.length, note: activeClientsNote(clients), icon: BriefcaseBusiness, tone: "blue", href: "/clients" },
-    { label: "Active Projects", value: activeProjects.length, note: visibleProjects.length + " total projects", icon: FolderKanban, tone: "green", href: "/projects" },
-    { label: "Total Team Members", value: activePeople.length, note: employees.length - activePeople.length + " inactive", icon: Users, tone: "violet", href: "/people" },
-    { label: "Pending Approvals", value: pendingApprovals.length, note: pendingApprovals.length ? "Requires review" : "All caught up", icon: ClipboardCheck, tone: "amber", href: "/approvals" },
-    { label: "Overdue Tasks", value: overdue.length, note: overdue.length ? "Needs a decision today" : "No overdue work", icon: AlertTriangle, tone: "red", href: "/tasks" },
-    { label: "Overall Completion Rate", value: completion + "%", note: completed + " of " + spaceTasks.length + " tasks complete", icon: TrendingUp, tone: "cyan", href: "/reports" },
+    { label: "Open tasks", value: openTasks.length, note: soon + " due in the next 7 days", icon: CheckCircle2, tone: "blue" },
+    { label: "Delivery rate", value: completion + "%", note: completed + " completed in this space", icon: TrendingUp, tone: "green" },
+    { label: "At-risk items", value: overdue.length, note: overdue.length ? "Needs a decision today" : "No overdue work", icon: AlertTriangle, tone: "red" },
+    { label: "Team capacity", value: capacity + "%", note: totalOpenHours + "h of active workload", icon: Users, tone: "violet" },
+    { label: "Collected", value: currency(collected), note: "Paid client invoices", icon: Wallet, tone: "amber" },
   ];
 
   const teamLoads = useMemo<TeamLoad[]>(
@@ -1841,11 +1098,8 @@ export default function DirectorDashboard() {
     try {
       await save("tasks", { ...task, status: nextStatus });
       setActionError("");
-      setToast({ tone: "success", message: "Task status updated successfully." });
     } catch (cause) {
-      const message = errorMessage(cause);
-      setActionError(message);
-      setToast({ tone: "error", message });
+      setActionError(errorMessage(cause));
     }
   }
 
@@ -1854,58 +1108,6 @@ export default function DirectorDashboard() {
   const firstName = stringValue(user?.name || "Director").trim().split(/\s+/)[0] || "Director";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-
-  useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 4200);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  const openComposer = (kind: ComposerKind, row?: Entity) => {
-    setComposer({ kind, row });
-    setMobileRailOpen(false);
-  };
-
-  const notifySuccess = (message: string) => {
-    setActionError("");
-    setToast({ tone: "success", message });
-  };
-
-  const notifyFailure = (message: string) => {
-    setActionError(message);
-    setToast({ tone: "error", message });
-  };
-
-  async function archiveSelectedClient() {
-    if (!archiveClient) return;
-    const target = archiveClient;
-    try {
-      await save("clients", {
-        ...target,
-        status: "Archived",
-        archived_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        updated_by: user?.id,
-      });
-      try {
-        await save("activity_logs", {
-          name: "Client archived",
-          description: "Archived " + entityName(target) + " from Creative Adhyayan.",
-          actor_id: user?.id,
-          created_by: user?.id,
-          entity_type: "clients",
-          entity_id: target.id,
-          created_at: new Date().toISOString(),
-        });
-      } catch {
-        // The client archive is the primary operation.
-      }
-      setArchiveClient(null);
-      notifySuccess("Client archived successfully.");
-    } catch (cause) {
-      notifyFailure(errorMessage(cause));
-    }
-  }
 
   if (!user) return null;
   if (loading) return <DirectorLoadingState />;
@@ -1926,23 +1128,17 @@ export default function DirectorDashboard() {
           </div>
         </div>
         <div className="director-header-actions">
-          <QuickAddMenu onAction={openComposer} />
-          <Link className="icon-btn director-header-icon" to="/notifications" aria-label="Notifications" title="Notifications"><Bell size={17} /></Link>
-          <Link className="icon-btn director-header-icon" to="/activity_logs" aria-label="Activity and audit logs" title="Activity and audit logs"><HelpCircle size={17} /></Link>
           <Button className="secondary" onClick={() => setComposer({ kind: "project" })}>
             <FolderKanban size={16} /> New project
           </Button>
           <Button onClick={() => setComposer({ kind: "task" })}>
             <Plus size={17} /> New task
           </Button>
-          <button type="button" className="icon-btn director-mobile-menu-button" onClick={() => setMobileRailOpen((current) => !current)} aria-label={mobileRailOpen ? "Close workspace navigation" : "Open workspace navigation"} aria-expanded={mobileRailOpen}>
-            {mobileRailOpen ? <X size={19} /> : <SlidersHorizontal size={19} />}
-          </button>
         </div>
       </header>
 
       <div className="director-layout">
-        <aside className={"director-space-rail " + (mobileRailOpen ? "is-open" : "")} aria-label="Workspace spaces">
+        <aside className="director-space-rail" aria-label="Workspace spaces">
           <div className="director-rail-heading">
             <span>WORKSPACE</span>
             <button
@@ -1999,26 +1195,9 @@ export default function DirectorDashboard() {
           <nav className="director-tool-links" aria-label="Workspace tools">
             <Link to="/projects"><FolderKanban size={16} /> Projects <ChevronRight size={14} /></Link>
             <Link to="/people"><Users size={16} /> People & roles <ChevronRight size={14} /></Link>
-            <Link to="/clients"><BriefcaseBusiness size={16} /> Clients <ChevronRight size={14} /></Link>
-            <Link to="/tasks"><CheckCircle2 size={16} /> Tasks <ChevronRight size={14} /></Link>
-            <Link to="/teams"><Building2 size={16} /> Departments & teams <ChevronRight size={14} /></Link>
-            <Link to="/attendance"><Clock3 size={16} /> Attendance <ChevronRight size={14} /></Link>
-            <Link to="/approvals"><ClipboardCheck size={16} /> Approvals <ChevronRight size={14} /></Link>
             <Link to="/reports"><BarChart3 size={16} /> Reports <ChevronRight size={14} /></Link>
-            <Link to="/finance"><Wallet size={16} /> Finance <ChevronRight size={14} /></Link>
-            <Link to="/files"><FileText size={16} /> Files <ChevronRight size={14} /></Link>
-            <Link to="/notifications"><Bell size={16} /> Notifications <ChevronRight size={14} /></Link>
-            <Link to="/activity_logs"><Activity size={16} /> Activity & audit <ChevronRight size={14} /></Link>
             <Link to="/settings"><SlidersHorizontal size={16} /> Settings <ChevronRight size={14} /></Link>
           </nav>
-
-          <span className="director-rail-label director-rail-label-spaced">LIVE VIEWS</span>
-          <div className="director-tool-view-links" aria-label="Live workspace views">
-            {viewOptions.filter((option) => option.id !== "overview").map((option) => {
-              const Icon = option.icon;
-              return <button type="button" key={option.id} className={view === option.id ? "active" : ""} onClick={() => { setView(option.id); setMobileRailOpen(false); }}><Icon size={16} /> {option.label} <ChevronRight size={14} /></button>;
-            })}
-          </div>
 
           <div className={"director-rail-note " + (overdue.length ? "has-risk" : "")}>
             <Timer size={17} />
@@ -2031,14 +1210,13 @@ export default function DirectorDashboard() {
 
         <section className="director-main-column">
           <section className="director-kpi-grid" aria-label="Director workspace metrics">
-            {metrics.map(({ label, value, note, icon: Icon, tone, href }) => (
-              <Link className={"director-kpi director-kpi-" + tone} key={label} to={href}>
+            {metrics.map(({ label, value, note, icon: Icon, tone }) => (
+              <article className={"director-kpi director-kpi-" + tone} key={label}>
                 <span className="director-kpi-icon"><Icon size={18} /></span>
                 <span className="director-kpi-label">{label}</span>
                 <strong>{value}</strong>
                 <small>{note}</small>
-                <ArrowRight className="director-kpi-arrow" size={15} />
-              </Link>
+              </article>
             ))}
           </section>
 
@@ -2122,32 +1300,14 @@ export default function DirectorDashboard() {
           )}
 
           {view === "overview" && (
-            <>
-              <ClientSummarySection
-                clients={clients}
-                projects={visibleProjects}
-                tasks={spaceTasks}
-                people={employees}
-                onAdd={() => openComposer("client")}
-                onEdit={(client) => openComposer("client", client)}
-                onArchive={(client) => setArchiveClient(client)}
-              />
-              <PeopleSummarySection
-                people={employees}
-                onAdd={openComposer}
-                onEdit={(person) => openComposer(normalizedStatus(person.role) === "manager" ? "manager" : normalizedStatus(person.role) === "team lead" ? "team_lead" : "employee", person)}
-              />
-              <DirectorOverview
-                tasks={spaceTasks}
-                projects={visibleProjects}
-                teamLoads={teamLoads}
-                goals={goals}
-                activity={activity}
-                onOpenTask={setSelectedTask}
-              />
-              <DirectorAnalytics tasks={spaceTasks} projects={visibleProjects} people={employees} clients={clients} attendance={attendance} invoices={invoices} />
-              <DirectorQuickActions onAction={openComposer} />
-            </>
+            <DirectorOverview
+              tasks={spaceTasks}
+              projects={visibleProjects}
+              teamLoads={teamLoads}
+              goals={goals}
+              activity={activity}
+              onOpenTask={setSelectedTask}
+            />
           )}
 
           {view === "list" && (
@@ -2323,41 +1483,16 @@ export default function DirectorDashboard() {
       </div>
 
       {composer && (
-        composer.kind === "task" || composer.kind === "project" ? (
-          <DirectorComposer
-            key={composer.kind + "-" + (composer.row?.id || "new")}
-            kind={composer.kind}
-            row={composer.row}
-            spaces={spaces}
-            defaultSpaceId={activeSpace === "everything" ? spaces[0]?.id || "" : activeSpace}
-            onSaved={notifySuccess}
-            onFailed={notifyFailure}
-            onClose={() => setComposer(null)}
-          />
-        ) : (
-          <ManagementComposer
-            key={composer.kind + "-" + (composer.row?.id || "new")}
-            kind={composer.kind}
-            row={composer.row}
-            spaces={spaces}
-            onSaved={notifySuccess}
-            onFailed={notifyFailure}
-            onClose={() => setComposer(null)}
-          />
-        )
+        <DirectorComposer
+          key={composer.kind + "-" + (composer.row?.id || "new")}
+          kind={composer.kind}
+          row={composer.row}
+          spaces={spaces}
+          defaultSpaceId={activeSpace === "everything" ? spaces[0]?.id || "" : activeSpace}
+          onClose={() => setComposer(null)}
+        />
       )}
       {selectedTask && <TaskPanel task={selectedTask} onClose={() => setSelectedTask(null)} />}
-      {archiveClient && (
-        <Modal title="Archive client?" onClose={() => setArchiveClient(null)}>
-          <div className="director-confirm-dialog">
-            <span className="director-confirm-icon"><Archive size={20} /></span>
-            <h3>{entityName(archiveClient)}</h3>
-            <p>This keeps the client history safe but removes the record from active relationship views. You can restore it later from the Clients section.</p>
-            <div className="director-form-actions"><Button type="button" className="secondary" onClick={() => setArchiveClient(null)}>Cancel</Button><Button type="button" className="danger-button" onClick={archiveSelectedClient}><Archive size={15} /> Archive client</Button></div>
-          </div>
-        </Modal>
-      )}
-      {toast && <div className={"director-toast director-toast-" + toast.tone} role="status" aria-live="polite"><span>{toast.tone === "success" ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}</span><strong>{toast.message}</strong><button type="button" onClick={() => setToast(null)} aria-label="Dismiss notification"><X size={15} /></button></div>}
     </div>
   );
 }
