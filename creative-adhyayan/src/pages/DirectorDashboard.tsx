@@ -1203,7 +1203,7 @@ export default function DirectorDashboard() {
             <Timer size={17} />
             <span>
               <strong>{overdue.length ? "Attention needed" : "Stay ahead"}</strong>
-              <small>{overdue.length ? overdue.length + " overdue item" + (overdue.length === 1 ? "" : "s") + " need a decision." : review + " work item" + (review === 1 ? " is" : "s are") + " in review."}</small>
+              <small>{overdue.length ? overdue.length + " overdue task" + (overdue.length === 1 ? "" : "s") + " in this space" : "No overdue work in this space"}</small>
             </span>
           </div>
         </aside>
