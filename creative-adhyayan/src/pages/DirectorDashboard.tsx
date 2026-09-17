@@ -54,6 +54,7 @@ import { scoped, useWorkspace } from "../services/workspace";
 import { departments, statuses, type Entity } from "../types";
 import { exportCSV } from "../lib/csv";
 import { TaskPanel } from "../components/TaskPanel";
+import "./DirectorDashboard.css";
  
 type DirectorView = "overview" | "list" | "board" | "calendar" | "timeline" | "workload";
 type ComposerKind =
