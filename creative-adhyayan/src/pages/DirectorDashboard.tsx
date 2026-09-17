@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom"; 
 import {
   Activity,
@@ -174,11 +174,13 @@ function normalizedStatus(value: unknown): string {
 }
 
 function isActiveEntity(row: Entity): boolean {
-  return !["inactive", "archived", "deleted", "disabled", "closed"].includes(normalizedStatus(row.status));
+  const status = normalizedStatus(row.status || row.employment_status);
+  return !["inactive", "archived", "deleted", "disabled", "closed", "cancelled"].includes(status);
 }
 
 function isApproved(row: Entity): boolean {
-  return ["approved", "completed", "accepted", "paid"].includes(normalizedStatus(row.status));
+  const status = normalizedStatus(row.status || row.payment_status);
+  return ["approved", "completed", "accepted", "paid", "done"].includes(status);
 }
 
 function activeClientsNote(clients: Entity[]): string {
@@ -204,6 +206,27 @@ function relationId(row: Entity, ...keys: string[]): string {
 
 function fieldValue(row: Entity | undefined, ...keys: string[]): string {
   return row ? relationId(row, ...keys) : "";
+}
+
+function projectRelationId(row: Entity): string {
+  return relationId(row, "project_id", "projectId", "project");
+}
+
+function clientRelationId(row: Entity): string {
+  return relationId(row, "client_id", "clientId", "client");
+}
+
+function assigneeRelationId(row: Entity): string {
+  return relationId(row, "assignee", "assignee_id", "assigneeId", "assigned_to", "assignedTo", "user_id");
+}
+
+function dueValue(row: Entity): string {
+  return fieldValue(row, "due", "due_date", "dueDate", "deadline", "end_date", "endDate");
+}
+
+function createdDate(row?: Entity): Date | null {
+  if (!row) return null;
+  return dateFromValue(fieldValue(row, "created_at", "createdAt", "updated_at", "updatedAt"));
 }
 
 function errorMessage(cause: unknown): string {
@@ -330,22 +353,24 @@ function stringList(value: unknown): string[] {
 }
 
 function isOverdue(row: Entity, today = localDateKey()): boolean {
-  const due = dateKey(row.due);
-  return row.status !== "Completed" && Boolean(due) && due < today;
+  const due = dateKey(dueValue(row));
+  const status = normalizedStatus(row.status);
+  return !["completed", "done", "closed", "cancelled"].includes(status) && Boolean(due) && due < today;
 }
 
 function priorityWeight(value?: unknown): number {
-  return ({ Urgent: 4, High: 3, Medium: 2, Low: 1 } as Record<string, number>)[stringValue(value)] || 0;
+  return ({ urgent: 4, high: 3, medium: 2, low: 1 } as Record<string, number>)[normalizedStatus(value)] || 0;
 }
 
 function progressFor(projectId: string, tasks: Entity[]): number {
-  const related = tasks.filter((task) => stringValue(task.project_id) === projectId);
+  const related = tasks.filter((task) => projectRelationId(task) === projectId);
   if (!related.length) return 0;
-  return Math.round((related.filter((task) => task.status === "Completed").length / related.length) * 100);
+  return Math.round((related.filter((task) => ["completed", "done"].includes(normalizedStatus(task.status))).length / related.length) * 100);
 }
 
 function resolveSpaceId(row: Entity, projects: Map<string, Entity>): string {
-  const projectSpace = row.project_id ? projects.get(stringValue(row.project_id))?.space_id : undefined;
+  const projectId = projectRelationId(row);
+  const projectSpace = projectId ? projects.get(projectId)?.space_id : undefined;
   return stringValue(row.space_id || projectSpace || "space-" + slug(stringValue(row.department || row.team_id || "Creative")));
 }
 
@@ -359,7 +384,7 @@ function entityName(row?: Entity): string {
 }
 
 function compareTasks(a: Entity, b: Entity): number {
-  const completionOrder = Number(a.status === "Completed") - Number(b.status === "Completed");
+  const completionOrder = Number(normalizedStatus(a.status) === "completed") - Number(normalizedStatus(b.status) === "completed");
   if (completionOrder !== 0) return completionOrder;
   const priorityOrder = priorityWeight(b.priority) - priorityWeight(a.priority);
   if (priorityOrder !== 0) return priorityOrder;
@@ -369,11 +394,11 @@ function compareTasks(a: Entity, b: Entity): number {
 }
 
 function statusProgress(status: unknown): number {
-  const value = stringValue(status);
-  if (value === "Completed") return 100;
-  if (value === "Internal Review") return 82;
-  if (value === "Revision") return 70;
-  if (value === "In Progress") return 58;
+  const value = normalizedStatus(status);
+  if (value === "completed" || value === "done") return 100;
+  if (value === "internal review") return 82;
+  if (value === "revision") return 70;
+  if (value === "in progress") return 58;
   return 18;
 }
 
@@ -1043,10 +1068,10 @@ function TaskRow({
 }) {
   const today = localDateKey();
   const overdue = isOverdue(task, today);
-  const dueKey = dateKey(task.due);
+  const dueKey = dateKey(dueValue(task));
 
   return (
-    <article className={"director-task-row " + (task.status === "Completed" ? "is-complete" : "")}>
+    <article className={"director-task-row " + (normalizedStatus(task.status) === "completed" ? "is-complete" : "")}>
       <button
         type="button"
         className="director-task-main"
@@ -1068,7 +1093,7 @@ function TaskRow({
       <Badge value={stringValue(task.status || "To Do")} />
       <span className={"director-due " + (overdue ? "overdue" : "") + (dueKey === today ? " today" : "")}>
         <Clock3 size={14} />
-        <span>{overdue ? "Overdue · " : ""}{dateLabel(task.due)}</span>
+        <span>{overdue ? "Overdue · " : ""}{dateLabel(dueValue(task))}</span>
       </span>
       <span className="director-assignee">
         {assignee ? <Avatar name={entityName(assignee)} role={assignee.role} /> : <span className="director-unassigned">—</span>}
@@ -1126,7 +1151,7 @@ function BoardCard({
       <button type="button" className="director-board-title" onClick={onOpen}>{entityName(task)}</button>
       <div className="director-board-meta">
         <Badge value={stringValue(task.status || "To Do")} />
-        <span className={overdue ? "overdue" : ""}>{overdue ? "Overdue" : relativeDueLabel(task.due)}</span>
+        <span className={overdue ? "overdue" : ""}>{overdue ? "Overdue" : relativeDueLabel(dueValue(task))}</span>
       </div>
       <div className="director-board-foot">
         <small>{stringValue(task.department || task.team_id || "Creative")}</small>
@@ -1161,7 +1186,7 @@ function BoardColumn({
           <BoardCard
             key={task.id}
             task={task}
-            assignee={peopleById.get(stringValue(task.assignee))}
+            assignee={peopleById.get(assigneeRelationId(task))}
             onOpen={() => onOpen(task)}
           />
         ))}
@@ -1203,9 +1228,10 @@ function clientRelationProjects(client: Entity, projects: Entity[]): Entity[] {
 function clientNeedsAttention(client: Entity, projects: Entity[], tasks: Entity[]): boolean {
   if (["at risk", "overdue", "inactive", "archived"].includes(normalizedStatus(client.status))) return true;
   const relatedProjects = clientRelationProjects(client, projects);
+  const projectIds = new Set(relatedProjects.map((project) => stringValue(project.id)));
   return tasks.some((task) => {
-    const linkedClient = relationId(task, "client_id", "clientId", "client");
-    return Boolean(linkedClient && linkedClient === stringValue(client.id) && isOverdue(task));
+    const linkedClient = clientRelationId(task);
+    return Boolean((linkedClient === stringValue(client.id) || projectIds.has(projectRelationId(task))) && isOverdue(task));
   }) || relatedProjects.some((project) => normalizedStatus(project.status) === "at risk");
 }
 
@@ -1228,9 +1254,9 @@ function ClientCard({
   const projectIds = new Set(relatedProjects.map((project) => stringValue(project.id)));
   const relatedTasks = tasks.filter((task) => {
     const linkedClient = relationId(task, "client_id", "clientId", "client");
-    return linkedClient === stringValue(client.id) || projectIds.has(stringValue(task.project_id));
+    return linkedClient === stringValue(client.id) || projectIds.has(projectRelationId(task));
   });
-  const openTasks = relatedTasks.filter((task) => task.status !== "Completed").length;
+  const openTasks = relatedTasks.filter((task) => normalizedStatus(task.status) !== "completed").length;
   const completion = relatedProjects.length
     ? Math.round(relatedProjects.reduce((sum, project) => sum + progressFor(stringValue(project.id), tasks), 0) / relatedProjects.length)
     : 0;
@@ -1403,18 +1429,81 @@ function DirectorAnalytics({
   const attendancePresent = attendance.filter((row) => ["present", "on time", "approved"].includes(normalizedStatus(row.status))).length;
   const attendanceRate = attendance.length ? Math.round((attendancePresent / attendance.length) * 100) : 0;
   const activeProjects = projects.filter((project) => isActiveEntity(project) && normalizedStatus(project.status) !== "completed");
+  const completedProjects = projects.filter((project) => normalizedStatus(project.status) === "completed");
+  const delayedProjects = projects.filter((project) => {
+    const due = dateKey(fieldValue(project, "due", "due_date", "dueDate", "end_date", "endDate"));
+    return Boolean(due && due < localDateKey() && normalizedStatus(project.status) !== "completed");
+  });
+  const atRiskProjects = projects.filter((project) => {
+    if (["at risk", "overdue", "delayed"].includes(normalizedStatus(project.status))) return true;
+    return tasks.some((task) => projectRelationId(task) === stringValue(project.id) && isOverdue(task));
+  });
+  const projectHealth = [
+    { label: "Active", value: activeProjects.length, tone: "green" },
+    { label: "Completed", value: completedProjects.length, tone: "blue" },
+    { label: "Delayed", value: delayedProjects.length, tone: "amber" },
+    { label: "At risk", value: atRiskProjects.length, tone: "red" },
+  ];
+  const teamPerformance = people
+    .filter(isActiveEntity)
+    .map((person) => {
+      const assigned = tasks.filter((task) => assigneeRelationId(task) === stringValue(person.id));
+      const completed = assigned.filter((task) => normalizedStatus(task.status) === "completed").length;
+      return { person, total: assigned.length, completed, percent: assigned.length ? Math.round((completed / assigned.length) * 100) : 0 };
+    })
+    .filter((item) => item.total > 0)
+    .sort((a, b) => b.percent - a.percent || b.total - a.total)
+    .slice(0, 5);
+  const clientActivity = clients
+    .map((client) => {
+      const relatedProjects = clientRelationProjects(client, projects);
+      const projectIds = new Set(relatedProjects.map((project) => stringValue(project.id)));
+      const relatedTasks = tasks.filter((task) => clientRelationId(task) === stringValue(client.id) || projectIds.has(projectRelationId(task)));
+      return { client, projects: relatedProjects.length, tasks: relatedTasks.length, activity: relatedProjects.length + relatedTasks.length };
+    })
+    .filter((item) => item.activity > 0)
+    .sort((a, b) => b.activity - a.activity)
+    .slice(0, 5);
+  const now = new Date();
+  const isInCurrentMonth = (value: unknown) => {
+    const date = dateFromValue(value);
+    return Boolean(date && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth());
+  };
+  const monthlyCreated = tasks.filter((task) => isInCurrentMonth(createdDate(task))).length;
+  const monthlyCompleted = tasks.filter((task) => normalizedStatus(task.status) === "completed" && isInCurrentMonth(fieldValue(task, "completed_at", "completedAt", "updated_at", "updatedAt"))).length;
 
   return (
     <section className="director-card director-analytics-shell">
       <div className="director-card-heading"><div><span className="eyebrow"><BarChart3 size={14} /> LIVE ANALYTICS</span><h2>Delivery signals from real records</h2></div><Link to="/reports">Open reports <ArrowRight size={15} /></Link></div>
-      <div className="director-analytics-grid">
+      <div className="director-analytics-summary-strip flex flex-wrap gap-3" aria-label="Project health summary">
+        {projectHealth.map((item) => <span className={"director-analytics-summary director-analytics-summary-" + item.tone} key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
+      </div>
+      <div className="director-analytics-grid grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <article className="director-analytics-panel">
           <div className="director-analytics-panel-head"><span><ClipboardCheck size={16} /> Tasks by status</span><strong>{tasks.length}</strong></div>
           <div className="director-analytics-bars">{statusesForChart.map((status) => { const count = tasks.filter((task) => stringValue(task.status) === status).length; return <div className="director-analytics-bar-row" key={status}><span>{status}</span><i><b style={{ width: barWidth(count, tasks.length) }} /></i><strong>{count}</strong></div>; })}</div>
         </article>
         <article className="director-analytics-panel">
-          <div className="director-analytics-panel-head"><span><Target size={16} /> Priority mix</span><strong>{tasks.filter((task) => task.status !== "Completed").length} open</strong></div>
+          <div className="director-analytics-panel-head"><span><Target size={16} /> Priority mix</span><strong>{tasks.filter((task) => normalizedStatus(task.status) !== "completed").length} open</strong></div>
           <div className="director-analytics-bars">{priorities.map((priority) => { const count = tasks.filter((task) => stringValue(task.priority) === priority).length; return <div className="director-analytics-bar-row" key={priority}><span>{priority}</span><i><b className={"priority-bar priority-bar-" + priority.toLowerCase()} style={{ width: barWidth(count, tasks.length) }} /></i><strong>{count}</strong></div>; })}</div>
+        </article>
+        <article className="director-analytics-panel">
+          <div className="director-analytics-panel-head"><span><Gauge size={16} /> Project health</span><strong>{projects.length} total</strong></div>
+          <div className="director-analytics-bars">{projectHealth.map((item) => <div className="director-analytics-bar-row" key={item.label}><span>{item.label}</span><i><b className={"health-bar health-bar-" + item.tone} style={{ width: barWidth(item.value, projects.length) }} /></i><strong>{item.value}</strong></div>)}</div>
+        </article>
+        <article className="director-analytics-panel">
+          <div className="director-analytics-panel-head"><span><Users size={16} /> Team performance</span><strong>{teamPerformance.length} tracked</strong></div>
+          {teamPerformance.length ? <div className="director-analytics-bars">{teamPerformance.map(({ person, total, completed, percent }) => <div className="director-analytics-bar-row" key={person.id}><span>{entityName(person)}</span><i><b className="performance-bar" style={{ width: percent + "%" }} /></i><strong>{completed}/{total}</strong></div>)}</div> : <p className="director-analytics-empty">Assign tasks to see real completion performance.</p>}
+        </article>
+        <article className="director-analytics-panel">
+          <div className="director-analytics-panel-head"><span><BriefcaseBusiness size={16} /> Client activity</span><strong>{clientActivity.length} tracked</strong></div>
+          {clientActivity.length ? <div className="director-analytics-bars">{clientActivity.map(({ client, projects: projectCount, tasks: taskCount, activity }) => <div className="director-analytics-bar-row" key={client.id}><span>{entityName(client)}</span><i><b className="client-bar" style={{ width: barWidth(activity, clientActivity[0]?.activity || 1) }} /></i><strong>{projectCount}P · {taskCount}T</strong></div>)}</div> : <p className="director-analytics-empty">Link clients to projects or tasks to see activity.</p>}
+        </article>
+        <article className="director-analytics-panel">
+          <div className="director-analytics-panel-head"><span><TrendingUp size={16} /> Monthly productivity</span><strong>{monthlyCompleted} completed</strong></div>
+          <div className="director-productivity-card"><span><small>Created this month</small><strong>{monthlyCreated}</strong></span><span><small>Completed this month</small><strong>{monthlyCompleted}</strong></span></div>
+          <div className="director-productivity-meter"><i style={{ width: barWidth(monthlyCompleted, Math.max(monthlyCreated, monthlyCompleted, 1)) }} /></div>
+          <p className="director-analytics-empty">Based on dated task records in the current month.</p>
         </article>
         <article className="director-analytics-panel director-analytics-highlight">
           <div className="director-analytics-panel-head"><span><Gauge size={16} /> Organization pulse</span><strong>{attendance.length ? attendanceRate + "%" : "—"}</strong></div>
@@ -1449,6 +1538,7 @@ function DirectorQuickActions({ onAction }: { onAction: (kind: ComposerKind) => 
 
 function QuickAddMenu({ onAction }: { onAction: (kind: ComposerKind) => void }) {
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const actions: Array<{ kind: ComposerKind; label: string; icon: LucideIcon }> = [
     { kind: "client", label: "Add Client", icon: BriefcaseBusiness },
     { kind: "employee", label: "Add Employee", icon: UserRound },
@@ -1460,8 +1550,24 @@ function QuickAddMenu({ onAction }: { onAction: (kind: ComposerKind) => void }) 
     { kind: "task", label: "Create Task", icon: CheckCircle2 },
   ];
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
   return (
-    <div className="director-quick-add">
+    <div className="director-quick-add" ref={menuRef}>
       <button type="button" className="btn" onClick={() => setOpen((current) => !current)} aria-expanded={open} aria-haspopup="menu"><Plus size={16} /> Quick Add <ChevronRight className={open ? "director-chevron-open" : ""} size={14} /></button>
       {open && <div className="director-quick-add-menu" role="menu">{actions.map(({ kind, label, icon: Icon }) => <button type="button" role="menuitem" key={kind} onClick={() => { setOpen(false); onAction(kind); }}><Icon size={16} />{label}</button>)}</div>}
     </div>
@@ -1524,6 +1630,8 @@ function DirectorPulse({
 function DirectorOverview({
   tasks,
   projects,
+  people,
+  clients,
   teamLoads,
   goals,
   activity,
@@ -1531,21 +1639,31 @@ function DirectorOverview({
 }: {
   tasks: Entity[];
   projects: Entity[];
+  people: Entity[];
+  clients: Entity[];
   teamLoads: TeamLoad[];
   goals: Entity[];
   activity: Entity[];
   onOpenTask: (task: Entity) => void;
 }) {
   const projectMap = new Map(projects.map((project) => [project.id, project]));
+  const peopleMap = new Map(people.map((person) => [person.id, person]));
+  const clientMap = new Map(clients.map((client) => [client.id, client]));
   const focusTasks = tasks
-    .filter((task) => task.status !== "Completed")
+    .filter((task) => normalizedStatus(task.status) !== "completed")
     .slice()
     .sort(compareTasks)
     .slice(0, 6);
   const healthProjects = projects
     .slice()
-    .sort((a, b) => Number(b.status === "At Risk") - Number(a.status === "At Risk") || progressFor(a.id, tasks) - progressFor(b.id, tasks))
+    .sort((a, b) => Number(normalizedStatus(b.status) === "at risk") - Number(normalizedStatus(a.status) === "at risk") || progressFor(a.id, tasks) - progressFor(b.id, tasks))
     .slice(0, 6);
+  const healthSummary = [
+    { label: "Active", value: projects.filter((project) => isActiveEntity(project) && normalizedStatus(project.status) !== "completed").length, tone: "green" },
+    { label: "Completed", value: projects.filter((project) => normalizedStatus(project.status) === "completed").length, tone: "blue" },
+    { label: "Delayed", value: projects.filter((project) => { const due = dateKey(fieldValue(project, "due", "due_date", "dueDate", "end_date", "endDate")); return Boolean(due && due < localDateKey() && normalizedStatus(project.status) !== "completed"); }).length, tone: "amber" },
+    { label: "At risk", value: projects.filter((project) => normalizedStatus(project.status) === "at risk" || tasks.some((task) => projectRelationId(task) === stringValue(project.id) && isOverdue(task))).length, tone: "red" },
+  ];
 
   return (
     <>
@@ -1565,7 +1683,7 @@ function DirectorOverview({
                   <span className={"director-priority priority-" + stringValue(task.priority || "Medium").toLowerCase()} />
                   <span>
                     <strong>{entityName(task)}</strong>
-                    <small>{projectMap.get(stringValue(task.project_id)) ? entityName(projectMap.get(stringValue(task.project_id))) : "Unlinked work"} · {relativeDueLabel(task.due)}</small>
+                    <small>{projectMap.get(projectRelationId(task)) ? entityName(projectMap.get(projectRelationId(task))) : "Unlinked work"} · {relativeDueLabel(dueValue(task))}</small>
                   </span>
                   <Badge value={stringValue(task.status || "To Do")} />
                   <ChevronRight size={15} />
@@ -1585,13 +1703,16 @@ function DirectorOverview({
             </div>
             <Link to="/projects">View all <ArrowRight size={15} /></Link>
           </div>
+          <div className="director-health-summary flex flex-wrap gap-2" aria-label="Project health summary">
+            {healthSummary.map((item) => <span className={"director-health-summary-item director-health-summary-" + item.tone} key={item.label}><small>{item.label}</small><strong>{item.value}</strong></span>)}
+          </div>
           {healthProjects.length ? (
             <div className="director-project-health-list">
               {healthProjects.map((project) => {
                 const progress = progressFor(project.id, tasks);
                 const projectRisk =
-                  project.status === "At Risk" ||
-                  tasks.some((task) => task.project_id === project.id && isOverdue(task));
+                  normalizedStatus(project.status) === "at risk" ||
+                  tasks.some((task) => projectRelationId(task) === project.id && isOverdue(task));
                 return (
                   <Link className="director-project-health" to="/projects" key={project.id}>
                     <span className="director-project-health-icon"><FolderKanban size={16} /></span>
@@ -1666,14 +1787,25 @@ function DirectorOverview({
         {activity.length ? (
           <div className="director-activity-list">
             {activity.slice(0, 7).map((item) => (
-              <div className="director-activity-row" key={item.id}>
-                <span className="director-activity-dot"><CircleDot size={15} /></span>
-                <span>
-                  <strong>{entityName(item)}</strong>
-                  <small>{item.description ? stringValue(item.description).slice(0, 100) : "Workspace activity recorded"}</small>
-                </span>
-                <time>{dateLabel(item.created_at)}</time>
-              </div>
+              (() => {
+                const actor = peopleMap.get(relationId(item, "actor_id", "actorId", "created_by", "createdBy", "user_id"));
+                const relatedProject = projectMap.get(relationId(item, "project_id", "projectId"));
+                const relatedClient = clientMap.get(relationId(item, "client_id", "clientId"));
+                const activityDate = dateFromValue(fieldValue(item, "created_at", "createdAt", "updated_at", "updatedAt"));
+                const timeLabel = activityDate?.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+                const relatedLabel = relatedProject ? entityName(relatedProject) : relatedClient ? entityName(relatedClient) : "";
+                return (
+                  <div className="director-activity-row" key={item.id}>
+                    <span className="director-activity-dot"><CircleDot size={15} /></span>
+                    <span>
+                      <strong>{entityName(item)}</strong>
+                      <small>{actor ? entityName(actor) + " · " : ""}{item.description ? stringValue(item.description).slice(0, 100) : "Workspace activity recorded"}{relatedLabel ? " · " + relatedLabel : ""}</small>
+                    </span>
+                    <time dateTime={activityDate?.toISOString()}>{dateLabel(activityDate || item.created_at)}{timeLabel ? " · " + timeLabel : ""}</time>
+                    <Link to="/activity_logs" className="director-activity-view" aria-label="View activity details">View</Link>
+                  </div>
+                );
+              })()
             ))}
           </div>
         ) : (
@@ -1700,6 +1832,8 @@ export default function DirectorDashboard() {
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const globalSearchRef = useRef<HTMLInputElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
 
   const projects = rowsFrom(data, "projects");
   const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
@@ -1734,8 +1868,8 @@ export default function DirectorDashboard() {
     const query = search.trim().toLowerCase();
     return spaceTasks
       .filter((task) => {
-        const project = projectMap.get(stringValue(task.project_id));
-        const assignee = peopleById.get(stringValue(task.assignee));
+        const project = projectMap.get(projectRelationId(task));
+        const assignee = peopleById.get(assigneeRelationId(task));
         const haystack = [
           entityName(task),
           task.description,
@@ -1748,25 +1882,25 @@ export default function DirectorDashboard() {
 
         return (
           (!query || haystack.includes(query)) &&
-          (statusFilter === "All" || task.status === statusFilter) &&
-          (priorityFilter === "All" || task.priority === priorityFilter) &&
-          (assigneeFilter === "All" || stringValue(task.assignee) === assigneeFilter)
+          (statusFilter === "All" || normalizedStatus(task.status) === normalizedStatus(statusFilter)) &&
+          (priorityFilter === "All" || normalizedStatus(task.priority) === normalizedStatus(priorityFilter)) &&
+          (assigneeFilter === "All" || assigneeRelationId(task) === assigneeFilter)
         );
       })
       .sort(compareTasks);
   }, [spaceTasks, search, statusFilter, priorityFilter, assigneeFilter, projectMap, peopleById]);
 
-  const completed = spaceTasks.filter((task) => task.status === "Completed").length;
-  const openTasks = spaceTasks.filter((task) => task.status !== "Completed");
+  const completed = spaceTasks.filter((task) => normalizedStatus(task.status) === "completed").length;
+  const openTasks = spaceTasks.filter((task) => normalizedStatus(task.status) !== "completed");
   const overdue = openTasks.filter((task) => isOverdue(task, today));
-  const review = spaceTasks.filter((task) => task.status === "Internal Review" || task.status === "Revision");
+  const review = spaceTasks.filter((task) => ["internal review", "revision"].includes(normalizedStatus(task.status)));
   const completion = Math.round((completed / Math.max(spaceTasks.length, 1)) * 100);
   const activeProjects = visibleProjects.filter((project) => isActiveEntity(project) && normalizedStatus(project.status) !== "completed");
   const activePeople = employees.filter(isActiveEntity);
   const pendingApprovals = approvals.filter((approval) => !isApproved(approval));
   const sevenDaysFromToday = addDaysKey(today, 7);
   const soon = openTasks.filter((task) => {
-    const due = dateKey(task.due);
+    const due = dateKey(dueValue(task));
     return Boolean(due) && due >= today && due <= sevenDaysFromToday;
   }).length;
   const totalOpenHours = openTasks.reduce((sum, task) => sum + numberValue(task.hours), 0);
@@ -1784,7 +1918,7 @@ export default function DirectorDashboard() {
   const teamLoads = useMemo<TeamLoad[]>(
     () => employees
       .map((person) => {
-        const assigned = spaceTasks.filter((task) => stringValue(task.assignee) === stringValue(person.id) && task.status !== "Completed");
+        const assigned = spaceTasks.filter((task) => assigneeRelationId(task) === stringValue(person.id) && normalizedStatus(task.status) !== "completed");
         const hours = assigned.reduce((sum, task) => sum + numberValue(task.hours), 0);
         return { person, hours, open: assigned.length, percent: Math.round((hours / 40) * 100) };
       })
@@ -1818,7 +1952,7 @@ export default function DirectorDashboard() {
   const calendarTaskMap = useMemo(() => {
     const map = new Map<string, Entity[]>();
     filteredTasks.forEach((task) => {
-      const due = dateKey(task.due);
+      const due = dateKey(dueValue(task));
       if (!due) return;
       const current = map.get(due) || [];
       current.push(task);
@@ -1837,7 +1971,7 @@ export default function DirectorDashboard() {
   async function handleDragEnd(event: DragEndEvent) {
     const nextStatus = event.over ? stringValue(event.over.id) : "";
     const task = tasks.find((item) => item.id === stringValue(event.active.id));
-    if (!task || !statuses.includes(nextStatus) || task.status === nextStatus) return;
+    if (!task || !statuses.includes(nextStatus) || normalizedStatus(task.status) === normalizedStatus(nextStatus)) return;
 
     try {
       await save("tasks", { ...task, status: nextStatus });
@@ -1862,6 +1996,30 @@ export default function DirectorDashboard() {
     const timer = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    const handleWorkspaceShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        globalSearchRef.current?.focus();
+      }
+      if (event.key === "Escape") {
+        setProfileOpen(false);
+        setMobileRailOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleWorkspaceShortcut);
+    return () => window.removeEventListener("keydown", handleWorkspaceShortcut);
+  }, []);
+
+  useEffect(() => {
+    if (!profileOpen) return undefined;
+    const closeProfileOnOutsideClick = (event: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", closeProfileOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeProfileOnOutsideClick);
+  }, [profileOpen]);
 
   const openComposer = (kind: ComposerKind, row?: Entity) => {
     setComposer({ kind, row });
@@ -1922,11 +2080,15 @@ export default function DirectorDashboard() {
   if (loading) return <DirectorLoadingState />;
 
   return (
-    <div className="director-page">
-      <header className="director-header">
-        <div className="director-header-copy">
+    <div className="director-page min-h-screen overflow-x-hidden bg-[#f7fbff] text-[#061536] selection:bg-[#38BDF8]/20">
+      <header className="director-header sticky top-0 z-40 border-b border-sky-100/80 bg-white/80 backdrop-blur-xl">
+        <div className="director-header-copy min-w-0">
+          <div className="director-workspace-brand mb-3 flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-[#2563EB] to-[#38BDF8] text-sm font-black tracking-tight text-white shadow-[0_10px_22px_rgba(37,99,235,0.22)]">CA</span>
+            <span className="flex flex-col"><strong className="text-sm font-bold text-[#061536]">Creative Adhyayan</strong><small className="text-[11px] font-medium text-slate-500">Director workspace</small></span>
+          </div>
           <span className="eyebrow"><Command size={14} /> DIRECTOR COMMAND CENTER</span>
-          <div className="director-title-line">
+          <div className="director-title-line flex flex-wrap items-center gap-3">
             <h1>{greeting}, {firstName}.</h1>
             <span className="director-live-pill"><i /> Live workspace</span>
           </div>
@@ -1936,11 +2098,12 @@ export default function DirectorDashboard() {
             <span><Users size={14} /> {employees.length} people · {projects.length} projects</span>
           </div>
         </div>
-        <div className="director-header-actions">
-          <label className="director-global-search">
+        <div className="director-header-actions flex-wrap">
+          <label className="director-global-search transition-shadow duration-300 focus-within:shadow-[0_0_0_4px_rgba(56,189,248,0.12)]">
             <Search size={16} aria-hidden="true" />
             <span className="sr-only">Search the workspace</span>
             <input
+              ref={globalSearchRef}
               aria-label="Search the workspace"
               placeholder="Search workspace…"
               value={search}
@@ -1951,13 +2114,13 @@ export default function DirectorDashboard() {
           <QuickAddMenu onAction={openComposer} />
           <Link className="icon-btn director-header-icon" to="/notifications" aria-label="Notifications" title="Notifications"><Bell size={17} /></Link>
           <Link className="icon-btn director-header-icon" to="/activity_logs" aria-label="Activity and audit logs" title="Activity and audit logs"><HelpCircle size={17} /></Link>
-          <Button className="secondary" onClick={() => setComposer({ kind: "project" })}>
+          <Button className="secondary" onClick={() => openComposer("project")}>
             <FolderKanban size={16} /> New project
           </Button>
-          <Button onClick={() => setComposer({ kind: "task" })}>
+          <Button onClick={() => openComposer("task")}>
             <Plus size={17} /> New task
           </Button>
-          <div className="director-profile-menu-wrap">
+          <div className="director-profile-menu-wrap" ref={profileMenuRef}>
             <button
               type="button"
               className="director-profile-trigger"
@@ -1986,8 +2149,9 @@ export default function DirectorDashboard() {
         </div>
       </header>
 
-      <div className="director-layout">
-        <aside className={"director-space-rail " + (mobileRailOpen ? "is-open" : "")} aria-label="Workspace spaces">
+      <div className="director-layout min-w-0">
+        {mobileRailOpen && <button type="button" className="director-rail-backdrop fixed inset-0 z-20 bg-[#061536]/20 backdrop-blur-[2px] lg:hidden" onClick={() => setMobileRailOpen(false)} aria-label="Close workspace navigation" />}
+        <aside className={"director-space-rail relative z-30 border-r border-sky-100/80 bg-white/80 backdrop-blur-xl " + (mobileRailOpen ? "is-open" : "")} aria-label="Workspace spaces">
           <div className="director-rail-heading">
             <span>WORKSPACE</span>
             <button
@@ -2008,6 +2172,7 @@ export default function DirectorDashboard() {
               onClick={() => {
                 setActiveSpace("everything");
                 setView("overview");
+                setMobileRailOpen(false);
               }}
               aria-current={activeSpace === "everything" ? "page" : undefined}
             >
@@ -2026,6 +2191,7 @@ export default function DirectorDashboard() {
                   onClick={() => {
                     setActiveSpace(space.id);
                     setView("list");
+                    setMobileRailOpen(false);
                   }}
                   aria-current={activeSpace === space.id ? "page" : undefined}
                 >
@@ -2041,7 +2207,7 @@ export default function DirectorDashboard() {
 
           <div className="director-rail-divider" />
           <span className="director-rail-label">WORKSPACE TOOLS</span>
-          <nav className="director-tool-links" aria-label="Workspace tools">
+          <nav className="director-tool-links" aria-label="Workspace tools" onClick={() => setMobileRailOpen(false)}>
             <Link to="/projects"><FolderKanban size={16} /> Projects <ChevronRight size={14} /></Link>
             <Link to="/people"><Users size={16} /> People & roles <ChevronRight size={14} /></Link>
             <Link to="/clients"><BriefcaseBusiness size={16} /> Clients <ChevronRight size={14} /></Link>
@@ -2074,15 +2240,15 @@ export default function DirectorDashboard() {
           </div>
         </aside>
 
-        <section className="director-main-column">
-          <section className="director-kpi-grid" aria-label="Director workspace metrics">
+        <section className="director-main-column min-w-0">
+          <section className="director-kpi-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Director workspace metrics">
             {metrics.map(({ label, value, note, icon: Icon, tone, href }) => (
-              <Link className={"director-kpi director-kpi-" + tone} key={label} to={href}>
+              <Link className={"director-kpi director-kpi-" + tone + " group transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_40px_rgba(37,99,235,0.14)]"} key={label} to={href}>
                 <span className="director-kpi-icon"><Icon size={18} /></span>
                 <span className="director-kpi-label">{label}</span>
                 <strong>{value}</strong>
                 <small>{note}</small>
-                <ArrowRight className="director-kpi-arrow" size={15} />
+                <ArrowRight className="director-kpi-arrow transition-transform duration-300 group-hover:translate-x-1" size={15} />
               </Link>
             ))}
           </section>
@@ -2185,6 +2351,8 @@ export default function DirectorDashboard() {
               <DirectorOverview
                 tasks={spaceTasks}
                 projects={visibleProjects}
+                people={employees}
+                clients={clients}
                 teamLoads={teamLoads}
                 goals={goals}
                 activity={activity}
@@ -2210,8 +2378,8 @@ export default function DirectorDashboard() {
                   <TaskRow
                     key={task.id}
                     task={task}
-                    project={projectMap.get(stringValue(task.project_id))}
-                    assignee={peopleById.get(stringValue(task.assignee))}
+                    project={projectMap.get(projectRelationId(task))}
+                    assignee={peopleById.get(assigneeRelationId(task))}
                     onOpen={() => setSelectedTask(task)}
                     onEdit={() => setComposer({ kind: "task", row: task })}
                   />
@@ -2237,7 +2405,7 @@ export default function DirectorDashboard() {
                     <BoardColumn
                       key={status}
                       status={status}
-                      tasks={filteredTasks.filter((task) => task.status === status)}
+                      tasks={filteredTasks.filter((task) => normalizedStatus(task.status) === normalizedStatus(status))}
                       peopleById={peopleById}
                       onOpen={setSelectedTask}
                     />
@@ -2287,7 +2455,7 @@ export default function DirectorDashboard() {
                               className={"director-calendar-task " + (isOverdue(task, today) ? "overdue" : "")}
                               key={task.id}
                               onClick={() => setSelectedTask(task)}
-                              title={entityName(task) + " · " + fullDateLabel(task.due)}
+                              title={entityName(task) + " · " + fullDateLabel(dueValue(task))}
                             >
                               <i />{entityName(task)}
                             </button>
@@ -2318,8 +2486,8 @@ export default function DirectorDashboard() {
                   return (
                     <button type="button" className="director-timeline-row" key={task.id} onClick={() => setSelectedTask(task)}>
                       <span className="director-timeline-date">
-                        {dateLabel(task.due)}
-                        <small>{fullDateLabel(task.due)}</small>
+                        {dateLabel(dueValue(task))}
+                        <small>{fullDateLabel(dueValue(task))}</small>
                       </span>
                       <span className="director-timeline-track">
                         <i style={{ width: progress + "%" }} />
@@ -2327,7 +2495,7 @@ export default function DirectorDashboard() {
                       </span>
                       <span className="director-timeline-copy">
                         <strong>{entityName(task)}</strong>
-                        <small>{projectMap.get(stringValue(task.project_id)) ? entityName(projectMap.get(stringValue(task.project_id))) : "Unlinked work"} · {stringValue(task.status || "To Do")}</small>
+                        <small>{projectMap.get(projectRelationId(task)) ? entityName(projectMap.get(projectRelationId(task))) : "Unlinked work"} · {stringValue(task.status || "To Do")}</small>
                       </span>
                       <ChevronRight size={15} />
                     </button>
