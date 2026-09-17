@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router-dom"; 
 import {
   Activity,
   AlertTriangle,
@@ -25,6 +25,7 @@ import {
   LayoutDashboard,
   List as ListIcon,
   Loader2,
+  LogOut,
   Mail,
   MessageCircle,
   MoreHorizontal,
@@ -1685,7 +1686,7 @@ function DirectorOverview({
 }
 
 export default function DirectorDashboard() {
-  const { user, data, save, loading } = useWorkspace();
+  const { user, data, save, loading, logout } = useWorkspace();
   const [activeSpace, setActiveSpace] = useState("everything");
   const [view, setView] = useState<DirectorView>("overview");
   const [search, setSearch] = useState("");
@@ -1698,6 +1699,7 @@ export default function DirectorDashboard() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [archiveClient, setArchiveClient] = useState<Entity | null>(null);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
 
   const projects = rowsFrom(data, "projects");
@@ -1851,7 +1853,8 @@ export default function DirectorDashboard() {
 
   const viewTitle = view === "overview" ? "Director overview" : view.charAt(0).toUpperCase() + view.slice(1) + " view";
   const hasFilters = Boolean(search || statusFilter !== "All" || priorityFilter !== "All" || assigneeFilter !== "All");
-  const firstName = stringValue(user?.name || "Director").trim().split(/\s+/)[0] || "Director";
+  const profileName = stringValue(user?.name || user?.email || "Director").trim() || "Director";
+  const firstName = profileName.split(/\s+/)[0] || "Director";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
@@ -1907,6 +1910,15 @@ export default function DirectorDashboard() {
     }
   }
 
+  async function handleLogout() {
+    try {
+      await logout();
+      setProfileOpen(false);
+    } catch (cause) {
+      notifyFailure(errorMessage(cause));
+    }
+  }
+
   if (!user) return null;
   if (loading) return <DirectorLoadingState />;
 
@@ -1926,6 +1938,17 @@ export default function DirectorDashboard() {
           </div>
         </div>
         <div className="director-header-actions">
+          <label className="director-global-search">
+            <Search size={16} aria-hidden="true" />
+            <span className="sr-only">Search the workspace</span>
+            <input
+              aria-label="Search the workspace"
+              placeholder="Search workspace…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <kbd>⌘ K</kbd>
+          </label>
           <QuickAddMenu onAction={openComposer} />
           <Link className="icon-btn director-header-icon" to="/notifications" aria-label="Notifications" title="Notifications"><Bell size={17} /></Link>
           <Link className="icon-btn director-header-icon" to="/activity_logs" aria-label="Activity and audit logs" title="Activity and audit logs"><HelpCircle size={17} /></Link>
@@ -1935,6 +1958,29 @@ export default function DirectorDashboard() {
           <Button onClick={() => setComposer({ kind: "task" })}>
             <Plus size={17} /> New task
           </Button>
+          <div className="director-profile-menu-wrap">
+            <button
+              type="button"
+              className="director-profile-trigger"
+              onClick={() => setProfileOpen((current) => !current)}
+              aria-expanded={profileOpen}
+              aria-haspopup="menu"
+            >
+              <Avatar name={profileName} role={user.role} />
+              <span><strong>{firstName}</strong><small>Director</small></span>
+              <ChevronRight className={profileOpen ? "director-chevron-open" : ""} size={15} />
+            </button>
+            {profileOpen && (
+              <div className="director-profile-popover" role="menu">
+                <div className="director-profile-popover-head">
+                  <Avatar name={profileName} role={user.role} />
+                  <span><strong>{profileName}</strong><small>{stringValue(user.email || "Director account")}</small></span>
+                </div>
+                <Link to="/settings" role="menuitem" onClick={() => setProfileOpen(false)}><SlidersHorizontal size={15} /> Profile & settings</Link>
+                <button type="button" role="menuitem" onClick={handleLogout}><LogOut size={15} /> Sign out</button>
+              </div>
+            )}
+          </div>
           <button type="button" className="icon-btn director-mobile-menu-button" onClick={() => setMobileRailOpen((current) => !current)} aria-label={mobileRailOpen ? "Close workspace navigation" : "Open workspace navigation"} aria-expanded={mobileRailOpen}>
             {mobileRailOpen ? <X size={19} /> : <SlidersHorizontal size={19} />}
           </button>
