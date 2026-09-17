@@ -1,0 +1,9 @@
+creative-crew WORKSPACE
+
+Open this folder in VS Code. In the terminal run:
+
+    npm install
+    npm run dev
+
+Open the localhost URL shown by Vite and sign in with Firebase Email/Password or Google.
+Read ROLE-LOGIN-SETUP.md before creating users. Use the complete project so the Firebase profile, role permissions and protected routes stay in sync.

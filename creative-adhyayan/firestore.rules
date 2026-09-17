@@ -1,0 +1,62 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isDirector() {
+      return signedIn() && currentProfile().role in ['director', 'super_admin', 'owner'];
+    }
+
+    function validRole(value) {
+      return value in ['director', 'manager', 'team_lead', 'employee'];
+    }
+
+    match /users/{uid} {
+      // A signed-in user can read only their own profile. Directors may read
+      // the directory so the management UI can be backed by a trusted service.
+      allow get: if signedIn() && (request.auth.uid == uid || isDirector());
+      allow list: if isDirector();
+
+      // Profile creation and role assignment must be performed by a trusted
+      // Admin SDK/Cloud Function. The browser must never grant itself access.
+      allow create: if false;
+
+      // Users can edit personal fields only. Role, active state and permissions
+      // are immutable from the browser. Directors can update non-director
+      // directory profiles through a trusted admin UI when rules are deployed.
+      allow update: if signedIn() && (
+        (
+          request.auth.uid == uid &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.active == resource.data.active &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'name', 'phone', 'job_title', 'location', 'bio', 'avatar_url',
+            'notification_preferences'
+          ])
+        ) || (
+          isDirector() &&
+          resource.data.role != 'director' &&
+          request.resource.data.role != 'director' &&
+          validRole(request.resource.data.role)
+        )
+      );
+
+      // The Director account is protected from browser deletion.
+      allow delete: if isDirector() && uid != request.auth.uid && resource.data.role != 'director';
+    }
+
+    // Workspace records are currently persisted per authenticated browser in
+    // the existing workspace service. Add collection-specific rules before
+    // moving these records into Firestore; the default is deny-by-default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
